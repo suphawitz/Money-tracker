@@ -6,7 +6,7 @@ import { Pie, Bar } from 'vue-chartjs';
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale, Title);
 
 // ⚠️ ใส่ URL ของคุณที่นี่
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyM6gzH-tWCAm0FQ-upNTyb1siDnQnMiJ_WL5tpegSkyTIhwi55bZzoNL-m2aE1XPIXAA/exec';
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw--IAnzBPYujMW64L4KD6dBFvT7Y4wSvs9u0PWnvQbWTfP1oMpY0R0z3goK8iMLC_Hyw/exec';
 
 // --- State ---
 const currentPage = ref('home');
@@ -15,7 +15,7 @@ const isSaving = ref(false);
 const transactions = ref([]);
 const categories = ref([]);
 
-const summaryYear = ref('all');
+const summaryYear = ref(new Date().getFullYear());
 const summaryMonth = ref('all');
 const months = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
 
@@ -30,7 +30,8 @@ const form = ref({
   category: '',
   name: '',
   amount: '',
-  note: '', // ✅ เพิ่มตัวแปร note ตรงนี้
+  note: '',
+  isMission: false, // ✅ เพิ่มตัวแปรนี้
   action: 'saveTransaction'
 });
 
@@ -56,18 +57,47 @@ const fetchAllData = async () => {
   }
 };
 
+// --- แก้ไขฟังก์ชัน submitTransaction เป็นแบบ Optimistic UI ---
 const submitTransaction = async () => {
   if(!form.value.category) return alert("กรุณาเลือกหมวดหมู่");
-  isSaving.value = true;
-  try {
-    await fetch(GOOGLE_SCRIPT_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(form.value) });
-    await fetchAllData();
-    // ✅ เคลียร์ค่า note ด้วย
-    form.value.name = ''; 
-    form.value.amount = ''; 
-    form.value.note = ''; 
-    alert("บันทึกสำเร็จ");
-  } catch (error) { alert("บันทึกผิดพลาด"); } finally { isSaving.value = false; }
+  
+  // 1. เตรียมข้อมูลสำหรับโชว์ทันที (สร้าง Object จำลอง)
+  const tempItem = {
+    date: form.value.date,
+    type: form.value.type,
+    category: form.value.category,
+    name: form.value.name,
+    amount: form.value.amount,
+    note: form.value.note,
+    isMission: form.value.isMission
+  };
+
+  // 2. ดันข้อมูลเข้า array หน้าเว็บทันที (ไม่ต้องรอ Server ตอบกลับ)
+  // ใส่ไว้บนสุดของ list
+  transactions.value.unshift(tempItem); 
+
+  // 3. จำค่าที่จะส่งไว้ก่อน (เพราะเดี๋ยวเราจะเคลียร์ฟอร์ม)
+  const payload = { ...form.value };
+
+  // 4. เคลียร์ฟอร์มทันที! (ผู้ใช้จะรู้สึกว่า "เสร็จแล้ว เร็วมาก")
+  form.value.name = ''; 
+  form.value.amount = ''; 
+  form.value.note = ''; 
+  form.value.isMission = false;
+
+  // 5. ส่งข้อมูลไป Google Sheet ใน "เบื้องหลัง" (ไม่ต้องใส่ await)
+  // ปล่อยให้มันหมุนของมันไป ผู้ใช้ไม่ต้องรอ
+  fetch(GOOGLE_SCRIPT_URL, { 
+    method: 'POST', 
+    mode: 'no-cors', 
+    headers: { 'Content-Type': 'text/plain' }, 
+    body: JSON.stringify(payload) 
+  }).then(() => {
+    console.log("✅ Data synced to sheet (Background)");
+  }).catch(err => {
+    console.error("❌ Sync failed", err);
+    alert("การบันทึกลง Sheet ล้มเหลว แต่ข้อมูลแสดงบนหน้าเว็บแล้ว");
+  });
 };
 
 const submitCategory = async () => {
@@ -118,8 +148,9 @@ const dashSummary = computed(() => {
   }
 });
 
+// ✅ Mission 2026 Logic ใหม่: กรองจาก Checkbox (isMission) ไม่ใช่ชื่อหมวดหมู่
 const mission2026Data = computed(() => {
-  const missionList = transactions.value.filter(t => t.type === 'เงินออม' && t.category === 'Mission 2026');
+  const missionList = transactions.value.filter(t => t.isMission === true);
   return missionList.filter(t => {
     const d = new Date(t.date);
     const matchYear = summaryYear.value === 'all' || d.getFullYear() === summaryYear.value;
@@ -158,7 +189,7 @@ onMounted(() => { fetchAllData(); });
     <div class="max-w-2xl mx-auto p-4">
       
       <nav class="flex justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm sticky top-2 z-50">
-        <h1 class="text-xl font-black text-gray-800 tracking-tighter">🚀 MONEY V3</h1>
+        <h1 class="text-xl font-black text-gray-800 tracking-tighter">🚀 MONEY V4</h1>
         <div class="flex gap-2">
            <button @click="currentPage='home'" :class="currentPage==='home'?'bg-black text-white':'bg-gray-100 text-gray-600'" class="px-3 py-2 rounded-lg text-xs font-bold transition-all">หน้าหลัก</button>
            <button @click="currentPage='dashboard'" :class="currentPage==='dashboard'?'bg-black text-white':'bg-gray-100 text-gray-600'" class="px-3 py-2 rounded-lg text-xs font-bold transition-all">สรุปยอด</button>
@@ -189,8 +220,13 @@ onMounted(() => { fetchAllData(); });
               </div>
               <input type="number" v-model="form.amount" placeholder="0.00" required inputmode="decimal" class="w-full p-4 text-3xl font-black text-right text-gray-800 placeholder-gray-200 border-b-2 border-gray-100 outline-none focus:border-black transition-all">
               
-              <input type="text" v-model="form.name" placeholder="ชื่อรายการ (เช่น ข้าวมันไก่)" class="w-full text-right text-sm text-gray-500 outline-none">
-              <input type="text" v-model="form.note" placeholder="📝 หมายเหตุ (Optional)" class="w-full text-right text-xs text-gray-400 outline-none border-t pt-3 mb-6">
+              <input type="text" v-model="form.name" placeholder="ชื่อรายการ" class="w-full text-right text-sm text-gray-500 outline-none">
+              <input type="text" v-model="form.note" placeholder="📝 หมายเหตุ" class="w-full text-right text-xs text-gray-400 outline-none">
+
+              <div class="flex items-center justify-end gap-2 pt-2 border-t mt-2">
+                 <label for="missionCheckbox" class="text-sm font-bold text-gray-600 cursor-pointer select-none">เข้ากองทุน Mission 2026</label>
+                 <input type="checkbox" id="missionCheckbox" v-model="form.isMission" class="w-5 h-5 accent-indigo-600 cursor-pointer">
+              </div>
 
               <button type="submit" :disabled="isSaving" class="w-full bg-black text-white py-3 rounded-xl font-bold active:scale-95 transition-transform">{{ isSaving ? '...' : 'บันทึกรายการ' }}</button>
            </form>
@@ -198,15 +234,17 @@ onMounted(() => { fetchAllData(); });
 
         <div class="space-y-3">
            <h3 class="font-bold text-gray-400 text-xs uppercase ml-2">รายการล่าสุด</h3>
-           <div v-for="(item, i) in homeTransactions" :key="i" class="bg-white p-3 rounded-xl flex justify-between items-center border border-gray-100 shadow-sm">
-              <div class="flex items-center gap-3">
+           <div v-for="(item, i) in homeTransactions" :key="i" class="bg-white p-3 rounded-xl flex justify-between items-center border border-gray-100 shadow-sm relative overflow-hidden">
+              <div v-if="item.isMission" class="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500"></div>
+
+              <div class="flex items-center gap-3 pl-2">
                  <div class="w-10 h-10 rounded-full flex items-center justify-center text-lg" :class="{'bg-red-50':item.type==='รายจ่าย','bg-green-50':item.type==='รายรับ','bg-blue-50':item.type==='เงินออม'}">{{ item.type==='รายจ่าย'?'💸':(item.type==='รายรับ'?'💰':'🐷') }}</div>
                  <div>
-                   <p class="font-bold text-gray-800 text-sm">{{ item.category }}</p>
-                   <p class="text-xs text-gray-400">
-                     {{ formatDate(item.date) }} 
-                     <span v-if="item.name">- {{ item.name }}</span>
+                   <p class="font-bold text-gray-800 text-sm flex items-center gap-1">
+                     {{ item.category }}
+                     <span v-if="item.isMission" class="text-[10px] bg-indigo-100 text-indigo-700 px-1 rounded">🚀 Mission</span>
                    </p>
+                   <p class="text-xs text-gray-400">{{ formatDate(item.date) }} <span v-if="item.name">- {{ item.name }}</span></p>
                    <p v-if="item.note" class="text-xs text-gray-500 mt-1 bg-gray-50 px-2 py-0.5 rounded inline-block">📝 {{ item.note }}</p>
                  </div>
               </div>
@@ -220,7 +258,7 @@ onMounted(() => { fetchAllData(); });
            <h2 class="font-bold text-gray-700">📊 ตัวกรองข้อมูล</h2>
            <div class="flex gap-2">
               <select v-model="summaryMonth" class="bg-gray-100 rounded-lg px-3 py-2 text-sm font-bold outline-none"><option value="all">ทุกเดือน</option><option v-for="(m, i) in months" :key="i" :value="i">{{ m }}</option></select>
-              <select v-model="summaryYear" class="bg-gray-100 rounded-lg px-3 py-2 text-sm font-bold outline-none"><option value="all">ทุกปี</option><option v-for="y in 5" :key="y" :value="2024 + y">{{ 2024 + y }}</option></select>
+              <select v-model="summaryYear" class="bg-gray-100 rounded-lg px-3 py-2 text-sm font-bold outline-none"><option value="all">all</option><option v-for="y in 5" :key="y" :value="2024 + y">{{ 2024 + y }}</option></select>
            </div>
         </div>
 
@@ -228,7 +266,7 @@ onMounted(() => { fetchAllData(); });
            <h3 class="font-bold text-gray-800 mb-4 text-center">ภาพรวม การเงิน</h3>
            <div class="h-64"><Bar :data="barData" :options="chartOptions" /></div>
            <div class="grid grid-cols-3 gap-2 mt-4 text-center">
-              <div><p class="text-xs text-gray-400">สุทธิ</p><p class="font-bold text-xl" :class="(dashSummary.income - dashSummary.expense - dashSummary.savings) >= 0 ? 'text-green-600' : 'text-red-600'">{{ formatMoney(dashSummary.income - dashSummary.expense - dashSummary.savings) }}</p></div>
+              <div><p class="text-xs text-gray-400">สุทธิ</p><p class="font-bold text-xl" :class="(dashSummary.income - dashSummary.expense) >= 0 ? 'text-green-600' : 'text-red-600'">{{ formatMoney(dashSummary.income - dashSummary.expense) }}</p></div>
               <div><p class="text-xs text-gray-400">เงินเข้า</p><p class="font-bold text-green-600">+{{ formatMoney(dashSummary.income) }}</p></div>
               <div><p class="text-xs text-gray-400">เงินออก</p><p class="font-bold text-red-600">-{{ formatMoney(dashSummary.expense) }}</p></div>
            </div>
@@ -237,16 +275,16 @@ onMounted(() => { fetchAllData(); });
         <div class="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
            <div class="relative z-10">
               <div class="flex justify-between items-start">
-                 <div><h3 class="font-black text-2xl italic tracking-wider">🚀 MISSION 2026</h3><p class="text-white/80 text-xs">เป้าหมายเงินออมแห่งอนาคต</p></div>
+                 <div><h3 class="font-black text-2xl italic tracking-wider">🚀 MISSION 2026</h3><p class="text-white/80 text-xs">ยอดสะสมจากการติ๊กเลือก</p></div>
                  <div class="text-right"><p class="text-xs text-white/80">ยอดสะสมรวม</p><p class="text-3xl font-black">{{ formatMoney(missionTotal) }} <span class="text-sm font-normal">บาท</span></p></div>
               </div>
               <div class="mt-6 bg-white/10 rounded-xl p-4 backdrop-blur-sm max-h-40 overflow-y-auto">
                  <h4 class="text-xs font-bold text-white/70 mb-2 uppercase">ประวัติการเก็บออม</h4>
-                 <div v-if="mission2026Data.length === 0" class="text-center text-white/50 text-sm py-2">ยังไม่มีรายการ (อย่าลืมสร้างหมวดหมู่ 'Mission 2026')</div>
+                 <div v-if="mission2026Data.length === 0" class="text-center text-white/50 text-sm py-2">ยังไม่มีรายการที่ติ๊ก Mission</div>
                  <div v-else class="space-y-2">
                     <div v-for="(t, i) in mission2026Data" :key="i" class="flex justify-between items-center text-sm border-b border-white/10 pb-1 last:border-0">
                        <div class="flex flex-col">
-                         <span class="font-medium text-white/90">{{ formatDate(t.date) }}</span>
+                         <span class="font-medium text-white/90">{{ formatDate(t.date) }} - {{ t.category }}</span>
                          <span v-if="t.note" class="text-[10px] text-white/60">📝 {{ t.note }}</span>
                        </div>
                        <span class="font-bold text-white">+{{ formatMoney(t.amount) }}</span>
@@ -271,7 +309,7 @@ onMounted(() => { fetchAllData(); });
             <form @submit.prevent="submitCategory" class="space-y-3">
                <div class="grid grid-cols-3 gap-2"><button type="button" v-for="t in ['รายจ่าย','รายรับ','เงินออม']" :key="t" @click="catForm.type=t" :class="catForm.type===t?'bg-black text-white':'bg-white border text-gray-400'" class="py-2 rounded-lg text-xs font-bold transition-all">{{ t }}</button></div>
                <input type="text" v-model="catForm.name" placeholder="ชื่อหมวดหมู่" required class="w-full p-2 border rounded-lg text-sm">
-               <button type="submit" :disabled="isSaving" class="w-full bg-green-500 text-white py-2 rounded-lg font-bold text-sm hover:bg-green-600">{{ isSaving ? '...' : '+ เพิ่มหมวดหมู่' }}</button>
+               <button type="submit" :disabled="isSaving" class="w-full bg-black text-white py-2 rounded-lg font-bold text-sm hover:bg-gray-800">{{ isSaving ? '...' : '+ เพิ่มหมวดหมู่' }}</button>
             </form>
          </div>
          <div>
